@@ -1,6 +1,6 @@
 module github.com/vishalanarase/kafka
 
-go 1.21.3
+go 1.21
 
 require github.com/segmentio/kafka-go v0.4.46
 
