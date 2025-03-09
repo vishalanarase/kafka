@@ -1,34 +1,60 @@
 package main
 
 import (
-	"context"
-	"log"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
-	"github.com/segmentio/kafka-go"
+	"github.com/confluentinc/confluent-kafka-go/kafka"
 )
 
 func main() {
-	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:   []string{"localhost:9092"},
-		Topic:     "user-registered",
-		Partition: 0,
-		MinBytes:  10e3, // 10KB
-		MaxBytes:  10e6, // 10MB
-
-		// Start consuming from the earliest available offset
-		StartOffset: kafka.LastOffset,
+	// Create consumer
+	c, err := kafka.NewConsumer(&kafka.ConfigMap{
+		"bootstrap.servers": "localhost:9092",
+		"group.id":          "kafka-go-getting-started",
+		"auto.offset.reset": "earliest",
 	})
 
-	defer r.Close()
-
-	for {
-		msg, err := r.ReadMessage(context.Background())
-		if err != nil {
-			log.Printf("Error reading message: %v", err)
-			break
-		}
-
-		log.Printf("Received message: %s", string(msg.Value))
-		// Logic to send email notification goes here...
+	if err != nil {
+		fmt.Printf("Failed to create consumer: %s", err)
+		os.Exit(1)
 	}
+
+	// Topic name
+	topic := "purchases"
+
+	// Subscribe the topics
+	err = c.SubscribeTopics([]string{topic}, nil)
+	if err != nil {
+		fmt.Printf("Failed to subscribe to topic %s: %s", topic, err)
+		os.Exit(1)
+	}
+
+	// Set up a channel for handling Ctrl-C, etc
+	sigchan := make(chan os.Signal, 1)
+	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Process messages
+	run := true
+	for run {
+		select {
+		case sig := <-sigchan:
+			fmt.Printf("Caught signal %v: terminating\n", sig)
+			run = false
+		default:
+			ev, err := c.ReadMessage(100 * time.Millisecond)
+			if err != nil {
+				// Errors are informational and automatically handled by the consumer
+				//fmt.Println("Error:", err)
+				continue
+			}
+			fmt.Printf("Consumed event from topic %s: key = %-10s value = %s\n",
+				*ev.TopicPartition.Topic, string(ev.Key), string(ev.Value))
+		}
+	}
+
+	c.Close()
 }
